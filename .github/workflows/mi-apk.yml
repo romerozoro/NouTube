@@ -1,4 +1,3 @@
-
 name: Mi APK
 
 on:
@@ -31,7 +30,7 @@ jobs:
           bun expo prebuild -p android --clean --no-install
 
       - name: build apk
-        run: ./gradlew assembleFullRelease
+        run: ./gradlew assembleFullRelease -PreactNativeArchitectures=arm64-v8a
         working-directory: android
 
       - name: sign apk
@@ -41,8 +40,10 @@ jobs:
         run: |
           BT=$(ls /usr/local/lib/android/sdk/build-tools/ | tail -n 1)
           TOOLS=/usr/local/lib/android/sdk/build-tools/$BT
-          echo "$SIGNING_KEY" | base64 -d > mi.jks
-          IN=$(ls android/app/build/outputs/apk/full/release/*-unsigned.apk | head -n 1)
+          KEY=$(printf '%s' "$SIGNING_KEY" | sed 's/SIGNING_KEY://' | tr -d ' \r\n\t')
+          echo "Largo de la llave: ${#KEY} (debe ser 3428)"
+          printf '%s' "$KEY" | base64 -d > mi.jks
+          IN=$(ls android/app/build/outputs/apk/full/release/*arm64-v8a*-unsigned.apk | head -n 1)
           $TOOLS/zipalign -f -p 4 "$IN" aligned.apk
           $TOOLS/apksigner sign --ks mi.jks --ks-pass "pass:$KEY_STORE_PASSWORD" --out NouTube-mio.apk aligned.apk
           rm mi.jks
