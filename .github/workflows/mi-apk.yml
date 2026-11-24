@@ -30,7 +30,7 @@ jobs:
           bun expo prebuild -p android --clean --no-install
 
       - name: build apk
-        run: ./gradlew assembleFullRelease -PreactNativeArchitectures=arm64-v8a
+        run: ./gradlew assembleFullRelease
         working-directory: android
 
       - name: sign apk
