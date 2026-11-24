@@ -17,7 +17,7 @@ const intentFilters = [
 
 module.exports = ({ config }: { config: ExpoConfig }) => {
   return {
-    name: 'NouTube',
+    name: 'ChuTube',
     slug: 'noutube',
     version,
     icon: './assets/images/icon.png',
@@ -44,7 +44,7 @@ module.exports = ({ config }: { config: ExpoConfig }) => {
       adaptiveIcon: {
         foregroundImage: './assets/images/adaptive-icon.png',
         monochromeImage: './assets/images/monochrome-icon.png',
-        backgroundColor: '#ffffff',
+        backgroundColor: '#000000',
       },
       predictiveBackGestureEnabled: false,
       package: 'jp.nonbili.noutube',

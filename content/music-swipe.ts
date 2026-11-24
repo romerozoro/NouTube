@@ -36,18 +36,50 @@ function skip(dir: 'next' | 'prev') {
   }
 }
 
-// Thumbnail of the neighbour song in the queue, if the player tells us.
+const thumbOf = (id: string) => `https://i.ytimg.com/vi/${id}/hqdefault.jpg`
+
+// Thumbnail of the neighbour song in the queue. Tries several places because
+// the mobile web player does not always expose the same one.
 function neighbourThumb(dir: 'next' | 'prev'): string | null {
+  const step = dir === 'next' ? 1 : -1
+  // 1) the player's own playlist
   try {
     const player = getPlayer()
     const list: string[] | undefined = player?.getPlaylist?.()
     const index: number | undefined = player?.getPlaylistIndex?.()
-    if (!list || typeof index !== 'number' || index < 0) return null
-    const id = list[dir === 'next' ? index + 1 : index - 1]
-    return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null
-  } catch {
-    return null
-  }
+    if (list?.length && typeof index === 'number' && index >= 0) {
+      const id = list[index + step]
+      if (id) return thumbOf(id)
+    }
+  } catch {}
+  // 2) the app state of YouTube Music
+  try {
+    const state = (document.querySelector('ytmusic-app') as any)?.store?.getState?.()
+    const items: any[] | undefined = state?.queue?.items
+    const sel = state?.queue?.selectedItem ?? state?.queue?.selected
+    if (items?.length) {
+      const idOf = (it: any) =>
+        it?.playlistPanelVideoRenderer?.videoId ??
+        it?.playlistPanelVideoWrapperRenderer?.primaryRenderer?.playlistPanelVideoRenderer?.videoId
+      let index = items.findIndex(
+        (it: any) =>
+          it?.playlistPanelVideoRenderer?.selected ||
+          it?.playlistPanelVideoWrapperRenderer?.primaryRenderer?.playlistPanelVideoRenderer?.selected,
+      )
+      if (index < 0 && typeof sel === 'number') index = sel
+      const id = index >= 0 ? idOf(items[index + step]) : null
+      if (id) return thumbOf(id)
+    }
+  } catch {}
+  // 3) the queue list rendered in the page
+  try {
+    const rows = Array.from(document.querySelectorAll('ytmusic-player-queue-item'))
+    const index = rows.findIndex((r) => r.hasAttribute('selected') || r.getAttribute('play-button-state') === 'playing')
+    const row = index >= 0 ? rows[index + step] : null
+    const img = row?.querySelector('img')?.getAttribute('src')
+    if (img) return img.replace(/=w\d+-h\d+[^&]*$/, '=w544-h544-l90-rj')
+  } catch {}
+  return null
 }
 
 // The biggest visible image in the full player is the cover.
@@ -170,6 +202,7 @@ export function attachMusicSwipe(doc: Document, win: Window) {
         if (src) d.peek = makePeek(d.rect, src)
       }
       place(d, false)
+      if (!d.peek) d.cover.style.opacity = String(1 - Math.min(Math.abs(dx) / d.rect.width, 1) * 0.7)
     },
     { capture: true, passive: false },
   )
