@@ -1,11 +1,11 @@
-// Swipe left/right on the YouTube Music player to skip songs, like the official
-// app: the cover follows your finger, flies out, and the next one slides in.
+// Swipe left/right on the YouTube Music cover to change song, like the official
+// app: the cover follows your finger, the next/previous cover peeks in from the
+// side, and letting go past the middle switches the song.
 
-const THRESHOLD_RATIO = 0.25 // fraction of the cover width needed to skip
+const THRESHOLD_RATIO = 0.3 // fraction of the cover width needed to skip
 const FLICK_SPEED = 0.5 // px/ms; a fast flick skips even if short
 const LOCK_PX = 10 // movement before deciding horizontal vs vertical
-
-const AREA_SELECTOR = 'ytmusic-player, ytmusic-player-bar'
+const GAP = 24 // px between the cover and the peeking one
 
 const IGNORED_TARGET_SELECTOR = [
   'button',
@@ -19,25 +19,47 @@ const IGNORED_TARGET_SELECTOR = [
   'ytmusic-menu-popup-renderer',
 ].join(', ')
 
-function findButton(doc: Document, area: Element, kind: 'next' | 'previous'): HTMLElement | null {
-  const selector = `.${kind}-button`
-  return (
-    area.querySelector<HTMLElement>(selector) ||
-    doc.querySelector<HTMLElement>(`ytmusic-player-controls ${selector}`) ||
-    doc.querySelector<HTMLElement>(`ytmusic-player-bar ${selector}`)
-  )
+const getPlayer = (): any => document.getElementById('movie_player')
+
+// Same next/previous the app uses for the notification buttons.
+function skip(dir: 'next' | 'prev') {
+  const app = (window as any).NouTube
+  if (app && typeof app[dir] === 'function') {
+    app[dir]()
+    return
+  }
+  const player = getPlayer()
+  if (dir === 'next') player?.nextVideo?.()
+  else {
+    player?.seekTo?.(0)
+    player?.previousVideo?.()
+  }
 }
 
-// The element that visually is "the cover": the biggest visible image in the
-// player, or its wrapper so rounded corners move together.
-function findCover(area: Element): HTMLElement | null {
-  if (area.tagName.toLowerCase() !== 'ytmusic-player') return null
+// Thumbnail of the neighbour song in the queue, if the player tells us.
+function neighbourThumb(dir: 'next' | 'prev'): string | null {
+  try {
+    const player = getPlayer()
+    const list: string[] | undefined = player?.getPlaylist?.()
+    const index: number | undefined = player?.getPlaylistIndex?.()
+    if (!list || typeof index !== 'number' || index < 0) return null
+    const id = list[dir === 'next' ? index + 1 : index - 1]
+    return id ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null
+  } catch {
+    return null
+  }
+}
+
+// The biggest visible image in the full player is the cover.
+function findCover(target: Element): HTMLElement | null {
+  const area = target.closest('ytmusic-player')
+  if (!area) return null
   let best: HTMLElement | null = null
   let bestArea = 0
   for (const img of area.querySelectorAll<HTMLElement>('img')) {
     const r = img.getBoundingClientRect()
     const a = r.width * r.height
-    if (a > bestArea) {
+    if (r.width > 80 && a > bestArea) {
       bestArea = a
       best = img
     }
@@ -47,48 +69,74 @@ function findCover(area: Element): HTMLElement | null {
   return wrapper && area.contains(wrapper) ? wrapper : best
 }
 
-function setStyle(el: HTMLElement, transform: string, opacity: string, transition: string) {
-  el.style.transition = transition
-  el.style.transform = transform
-  el.style.opacity = opacity
-}
-
-function resetStyle(el: HTMLElement) {
-  el.style.transition = ''
-  el.style.transform = ''
-  el.style.opacity = ''
-  el.style.willChange = ''
-}
-
 interface Drag {
   x: number
   y: number
   t: number
-  area: Element
-  cover: HTMLElement | null
-  width: number
+  cover: HTMLElement
+  rect: DOMRect
   locked: 'h' | 'v' | null
   dx: number
+  peek: HTMLImageElement | null
+  peekDir: 'next' | 'prev' | null
+}
+
+function makePeek(rect: DOMRect, src: string): HTMLImageElement {
+  const img = document.createElement('img')
+  img.src = src
+  Object.assign(img.style, {
+    position: 'fixed',
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+    objectFit: 'cover',
+    borderRadius: '12px',
+    zIndex: '2147483647',
+    pointerEvents: 'none',
+    willChange: 'transform',
+  } as CSSStyleDeclaration)
+  document.body.appendChild(img)
+  return img
 }
 
 export function attachMusicSwipe(doc: Document, win: Window) {
   let drag: Drag | null = null
-  let animating = false
+  let busy = false
+
+  const peekOffset = (d: Drag, dir: 'next' | 'prev') => (dir === 'next' ? 1 : -1) * (d.rect.width + GAP)
+
+  const place = (d: Drag, animate: boolean) => {
+    const t = animate ? 'transform 0.25s ease-out' : 'none'
+    d.cover.style.transition = t
+    d.cover.style.transform = `translateX(${d.dx}px)`
+    if (d.peek && d.peekDir) {
+      d.peek.style.transition = t
+      d.peek.style.transform = `translateX(${peekOffset(d, d.peekDir) + d.dx}px)`
+    }
+  }
+
+  const cleanup = (d: Drag) => {
+    d.cover.style.transition = ''
+    d.cover.style.transform = ''
+    d.cover.style.opacity = ''
+    d.peek?.remove()
+  }
 
   doc.addEventListener(
     'touchstart',
     (e: TouchEvent) => {
       drag = null
-      if (animating || e.touches.length !== 1) return
+      if (busy || e.touches.length !== 1) return
       const target = e.target as Element | null
-      if (!target?.closest) return
-      if (target.closest(IGNORED_TARGET_SELECTOR)) return
-      const area = target.closest(AREA_SELECTOR)
-      if (!area) return
+      if (!target?.closest || target.closest(IGNORED_TARGET_SELECTOR)) return
+      const cover = findCover(target)
+      if (!cover) return
+      const rect = cover.getBoundingClientRect()
       const touch = e.touches[0]
-      const cover = findCover(area)
-      const width = cover?.getBoundingClientRect().width || win.innerWidth
-      drag = { x: touch.clientX, y: touch.clientY, t: Date.now(), area, cover, width, locked: null, dx: 0 }
+      // only when the finger is on (or right next to) the cover
+      if (touch.clientY < rect.top - 20 || touch.clientY > rect.bottom + 20) return
+      drag = { x: touch.clientX, y: touch.clientY, t: Date.now(), cover, rect, locked: null, dx: 0, peek: null, peekDir: null }
     },
     { capture: true, passive: true },
   )
@@ -108,17 +156,20 @@ export function attachMusicSwipe(doc: Document, win: Window) {
           drag = null
           return
         }
-        if (d.cover) d.cover.style.willChange = 'transform, opacity'
       }
-      // Keep the page/WebView from taking over the gesture (that was what made
-      // the swipe work only sometimes).
       if (e.cancelable) e.preventDefault()
       e.stopPropagation()
       d.dx = dx
-      if (d.cover) {
-        const progress = Math.min(Math.abs(dx) / d.width, 1)
-        setStyle(d.cover, `translateX(${dx}px) rotate(${dx / 40}deg)`, String(1 - progress * 0.5), 'none')
+      // show the song we are heading to on the other side
+      const dir: 'next' | 'prev' = dx < 0 ? 'next' : 'prev'
+      if (d.peekDir !== dir) {
+        d.peek?.remove()
+        d.peek = null
+        d.peekDir = dir
+        const src = neighbourThumb(dir)
+        if (src) d.peek = makePeek(d.rect, src)
       }
+      place(d, false)
     },
     { capture: true, passive: false },
   )
@@ -127,43 +178,45 @@ export function attachMusicSwipe(doc: Document, win: Window) {
     const d = drag
     drag = null
     if (!d || d.locked !== 'h') return
-    const dx = d.dx
-    const speed = Math.abs(dx) / Math.max(Date.now() - d.t, 1)
-    const skip = !cancelled && (Math.abs(dx) > d.width * THRESHOLD_RATIO || (speed > FLICK_SPEED && Math.abs(dx) > 30))
-    const dir = dx < 0 ? -1 : 1
-    const button = skip ? findButton(doc, d.area, dir < 0 ? 'next' : 'previous') : null
-    const canSkip = !!button && button.getAttribute('aria-disabled') !== 'true'
-    const cover = d.cover
+    const speed = Math.abs(d.dx) / Math.max(Date.now() - d.t, 1)
+    const go = !cancelled && (Math.abs(d.dx) > d.rect.width * THRESHOLD_RATIO || (speed > FLICK_SPEED && Math.abs(d.dx) > 30))
+    busy = true
 
-    if (!canSkip) {
-      if (cover) {
-        setStyle(cover, 'translateX(0) rotate(0)', '1', 'transform 0.25s ease, opacity 0.25s ease')
-        win.setTimeout(() => resetStyle(cover), 260)
-      }
-      return
-    }
-
-    if (!cover) {
-      button!.click()
-      return
-    }
-
-    animating = true
-    // 1) fly out in the swipe direction
-    setStyle(cover, `translateX(${dir * d.width * 1.2}px) rotate(${dir * 12}deg)`, '0', 'transform 0.2s ease-in, opacity 0.2s ease-in')
-    win.setTimeout(() => {
-      button!.click()
-      // 2) jump to the opposite side, invisible
-      setStyle(cover, `translateX(${-dir * d.width * 0.6}px)`, '0', 'none')
-      // force layout so the next transition runs
-      void cover.offsetWidth
-      // 3) slide the new cover in
-      setStyle(cover, 'translateX(0) rotate(0)', '1', 'transform 0.25s ease-out, opacity 0.25s ease-out')
+    if (!go) {
+      d.dx = 0
+      place(d, true)
       win.setTimeout(() => {
-        resetStyle(cover)
-        animating = false
-      }, 270)
-    }, 200)
+        cleanup(d)
+        busy = false
+      }, 260)
+      return
+    }
+
+    const dir: 'next' | 'prev' = d.dx < 0 ? 'next' : 'prev'
+    // slide everything so the peeking cover lands where the cover was
+    d.dx = -peekOffset(d, dir)
+    if (d.peekDir !== dir) {
+      d.peek?.remove()
+      d.peek = null
+    }
+    place(d, true)
+    if (!d.peek) {
+      d.cover.style.transition = 'transform 0.25s ease-out, opacity 0.25s ease-out'
+      d.cover.style.opacity = '0'
+    }
+    win.setTimeout(() => {
+      skip(dir)
+      // put the real cover back (it now shows the new song) and fade out the copy
+      d.cover.style.transition = 'none'
+      d.cover.style.transform = ''
+      d.cover.style.opacity = ''
+      if (d.peek) {
+        d.peek.style.transition = 'opacity 0.3s ease'
+        win.setTimeout(() => d.peek && (d.peek.style.opacity = '0'), 350)
+        win.setTimeout(() => d.peek?.remove(), 700)
+      }
+      busy = false
+    }, 250)
   }
 
   doc.addEventListener('touchend', () => finish(false), { capture: true, passive: true })

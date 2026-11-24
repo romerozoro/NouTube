@@ -21,7 +21,7 @@ import { installEncodedAuthorNameFix } from './author-names'
 import { guardMediaSessionHandlers, installBackgroundGuard } from './background-guard'
 import { installSplitView, navigateWatch, setMuted, setNativeMini } from './split-view'
 import { installPlayerGestures } from './player-gestures'
-  import { installMusicSwipe } from './music-swipe'
+import { installMusicSwipe } from './music-swipe'
 
 try {
   if ((window as any).NouTubePreferH264) {
@@ -97,7 +97,8 @@ async function initObserver() {
   installBlocklistFilter()
   installDislikeCount()
   installDoubleTapGestures()
-  installPlayerGestures() ;installMusicSwipe()
+  installPlayerGestures()
+  installMusicSwipe()
   installFullscreenControls()
   installCommentTranslateButtons()
   installEncodedAuthorNameFix()
