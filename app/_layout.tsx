@@ -14,6 +14,7 @@ import { nIf } from '@/lib/utils'
 import { applyPalette, getDynamicPalette } from '@/lib/dynamic-palette'
 import { dynamicPalette$ } from '@/lib/theme'
 import { syncFeedNotificationTask } from '@/lib/feed-notifications'
+import { IntroAnimation } from '@/components/IntroAnimation'
 
 function RootLayoutContent() {
   const feedsEnabled = useValue(settings$.feedsEnabled)
@@ -77,6 +78,7 @@ function RootLayoutContent() {
         !pictureInPicture,
         <View className={isDark ? 'bg-zinc-800' : 'bg-zinc-100'} style={{ height: insets.bottom }} />,
       )}
+      <IntroAnimation />
     </View>
   )
 }

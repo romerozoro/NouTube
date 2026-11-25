@@ -630,4 +630,154 @@ export function installFullscreenControls() {
 
   document.addEventListener('fullscreenchange', onFullscreenChange)
   document.addEventListener('webkitfullscreenchange', onFullscreenChange)
+  installFullscreenSideSwipe()
+}
+
+// ChuTube: in fullscreen, drag up/down on the left side for brightness and on
+// the right side for volume, with a small bar showing the level.
+const SIDE_ZONE = 0.4
+const sideHudId = '_chu_side_hud'
+
+export function isFullscreenSideZone(x: number) {
+  if (!getFullscreenElement()) return false
+  const w = window.innerWidth
+  return x < w * SIDE_ZONE || x > w * (1 - SIDE_ZONE)
+}
+
+function showSideHud(kind: 'volume' | 'brightness', percent: number) {
+  const host = getFullscreenElement()
+  if (!host) return
+  let hud = document.getElementById(sideHudId)
+  if (!hud || hud.parentElement !== host) {
+    hud?.remove()
+    hud = document.createElement('div')
+    hud.id = sideHudId
+    hud.innerHTML = '<div class="_chu_icon"></div><div class="_chu_track"><div class="_chu_fill"></div></div><div class="_chu_pct"></div>'
+    Object.assign(hud.style, {
+      position: 'absolute',
+      top: '50%',
+      transform: 'translateY(-50%)',
+      zIndex: '2147483647',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: '8px',
+      padding: '12px 10px',
+      borderRadius: '16px',
+      background: 'rgba(0,0,0,0.6)',
+      color: '#fff',
+      font: '600 13px sans-serif',
+      pointerEvents: 'none',
+      transition: 'opacity 0.3s',
+    } as CSSStyleDeclaration)
+    const track = hud.querySelector<HTMLElement>('._chu_track')!
+    Object.assign(track.style, {
+      width: '6px',
+      height: '140px',
+      borderRadius: '3px',
+      background: 'rgba(255,255,255,0.3)',
+      position: 'relative',
+      overflow: 'hidden',
+    } as CSSStyleDeclaration)
+    const fill = hud.querySelector<HTMLElement>('._chu_fill')!
+    Object.assign(fill.style, { position: 'absolute', left: '0', right: '0', bottom: '0', background: '#fff' } as CSSStyleDeclaration)
+    host.append(hud)
+  }
+  hud.style.left = kind === 'brightness' ? '32px' : ''
+  hud.style.right = kind === 'volume' ? '32px' : ''
+  hud.style.opacity = '1'
+  hud.querySelector<HTMLElement>('._chu_icon')!.innerHTML = kind === 'volume' ? iconVolume : iconBrightness
+  hud.querySelector<HTMLElement>('._chu_fill')!.style.height = `${percent}%`
+  hud.querySelector<HTMLElement>('._chu_pct')!.textContent = `${Math.round(percent)}%`
+}
+
+let hideHudTimer: ReturnType<typeof setTimeout> | undefined
+function hideSideHud() {
+  clearTimeout(hideHudTimer)
+  hideHudTimer = setTimeout(() => {
+    const hud = document.getElementById(sideHudId)
+    if (hud) hud.style.opacity = '0'
+  }, 600)
+}
+
+export function installFullscreenSideSwipe() {
+  if (!window.isAndroid) return
+  let g: {
+    kind: 'volume' | 'brightness'
+    y: number
+    x: number
+    start: number
+    max: number
+    native: boolean
+    locked: boolean
+  } | null = null
+
+  const blocked = () =>
+    !getFullscreenElement() || document.getElementById(overlayId) || document.getElementById(panelId)
+
+  window.addEventListener(
+    'touchstart',
+    (e: TouchEvent) => {
+      g = null
+      if (e.touches.length !== 1 || blocked()) return
+      const t = e.touches[0]
+      if (!isFullscreenSideZone(t.clientX)) return
+      // ignore the very top/bottom edges (system gestures, progress bar)
+      if (t.clientY < 40 || t.clientY > window.innerHeight - 70) return
+      const left = t.clientX < window.innerWidth / 2
+      if (left) {
+        if (!hasNativeBrightness()) return
+        g = { kind: 'brightness', x: t.clientX, y: t.clientY, start: getCurrentBrightness(), max: 100, native: true, locked: false }
+      } else {
+        const vol = getVolumeControl()
+        if (!vol) return
+        g = { kind: 'volume', x: t.clientX, y: t.clientY, start: vol.value, max: vol.max, native: vol.native, locked: false }
+      }
+    },
+    { capture: true, passive: true },
+  )
+
+  window.addEventListener(
+    'touchmove',
+    (e: TouchEvent) => {
+      if (!g || e.touches.length !== 1) return
+      const t = e.touches[0]
+      const dy = t.clientY - g.y
+      const dx = t.clientX - g.x
+      if (!g.locked) {
+        if (Math.abs(dy) < 12 && Math.abs(dx) < 12) return
+        if (Math.abs(dx) > Math.abs(dy)) {
+          g = null
+          return
+        }
+        g.locked = true
+      }
+      if (e.cancelable) e.preventDefault()
+      e.stopPropagation()
+      // dragging the full screen height goes from 0 to max
+      const raw = g.start + (-dy / (window.innerHeight * 0.8)) * g.max
+      if (g.kind === 'brightness') {
+        const percent = Math.min(Math.max(Math.round(raw), 1), 100)
+        nouStorage.setItem(brightnessKey, String(percent))
+        applyBrightness(percent)
+        showSideHud('brightness', percent)
+      } else {
+        const value = Math.min(Math.max(Math.round(raw), 0), g.max)
+        if (g.native) window.NouTubeI?.setVolumeIndex?.(bridgeToken(), value)
+        else setWebVolume(value)
+        showSideHud('volume', (value / g.max) * 100)
+      }
+    },
+    { capture: true, passive: false },
+  )
+
+  const end = (e: TouchEvent) => {
+    if (g?.locked) {
+      e.stopPropagation()
+      hideSideHud()
+    }
+    g = null
+  }
+  window.addEventListener('touchend', end, { capture: true, passive: true })
+  window.addEventListener('touchcancel', end, { capture: true, passive: true })
 }

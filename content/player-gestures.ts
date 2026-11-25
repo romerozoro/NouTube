@@ -133,6 +133,11 @@ export function attachPlayerGestureListeners(doc: Document, win: Window) {
     const innerPlayer = host.querySelector('#movie_player') ?? (host.id === 'movie_player' ? host : null)
     const fsEl = getFullscreenElement(doc)
     if (fsEl) {
+      // the sides are for brightness/volume; only the middle exits fullscreen
+      if (touch.clientX < win.innerWidth * 0.4 || touch.clientX > win.innerWidth * 0.6) {
+        gesture = null
+        return
+      }
       if (!fsEl.contains(target)) {
         gesture = null
         return
