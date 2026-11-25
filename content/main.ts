@@ -15,6 +15,7 @@ import { installCommentTranslateButtons } from './translate'
 import { interceptClipboard } from './clipboard'
 import { installWatchNavigation } from './watch-nav'
 import { installFullscreenControls } from './fullscreen-controls'
+import { installNoHoldSpeed } from './no-hold-speed'
 import { installIOSFullscreen } from './ios-fullscreen'
 import { installSystemCaptionStyle } from './captions'
 import { installEncodedAuthorNameFix } from './author-names'
@@ -100,6 +101,7 @@ async function initObserver() {
   installPlayerGestures()
   installMusicSwipe()
   installFullscreenControls()
+  installNoHoldSpeed()
   installCommentTranslateButtons()
   installEncodedAuthorNameFix()
   if (window.isAndroid) {

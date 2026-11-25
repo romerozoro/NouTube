@@ -750,10 +750,13 @@ export function installFullscreenSideSwipe() {
           g = null
           return
         }
+        // let this first move reach YouTube so it knows the finger moved and
+        // does not take the drag for a long press (2x speed); hide the rest
         g.locked = true
+      } else {
+        e.stopPropagation()
       }
       if (e.cancelable) e.preventDefault()
-      e.stopPropagation()
       // dragging the full screen height goes from 0 to max
       const raw = g.start + (-dy / (window.innerHeight * 0.8)) * g.max
       if (g.kind === 'brightness') {
@@ -771,11 +774,8 @@ export function installFullscreenSideSwipe() {
     { capture: true, passive: false },
   )
 
-  const end = (e: TouchEvent) => {
-    if (g?.locked) {
-      e.stopPropagation()
-      hideSideHud()
-    }
+  const end = () => {
+    if (g?.locked) hideSideHud()
     g = null
   }
   window.addEventListener('touchend', end, { capture: true, passive: true })
