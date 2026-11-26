@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -43,12 +46,27 @@ jobs:
           KEY=$(printf '%s' "$SIGNING_KEY" | sed 's/SIGNING_KEY://' | tr -d ' \r\n\t')
           echo "Largo de la llave: ${#KEY} (debe ser 3428)"
           printf '%s' "$KEY" | base64 -d > mi.jks
-          IN=$(ls android/app/build/outputs/apk/full/release/*arm64-v8a*-unsigned.apk | head -n 1)
-          $TOOLS/zipalign -f -p 4 "$IN" aligned.apk
-          $TOOLS/apksigner sign --ks mi.jks --ks-pass "pass:$KEY_STORE_PASSWORD" --out NouTube-mio.apk aligned.apk
+          OUT=android/app/build/outputs/apk/full/release
+          sign() {
+            IN=$(ls $OUT/*$1*-unsigned.apk | head -n 1)
+            $TOOLS/zipalign -f -p 4 "$IN" aligned-$1.apk
+            $TOOLS/apksigner sign --ks mi.jks --ks-pass "pass:$KEY_STORE_PASSWORD" --out "$2" aligned-$1.apk
+          }
+          sign arm64-v8a ChuTube.apk
+          sign armeabi-v7a ChuTube-arm32.apk
+          cp ChuTube.apk NouTube-mio.apk
           rm mi.jks
 
       - uses: actions/upload-artifact@v4
         with:
           name: NouTube-mio
           path: NouTube-mio.apk
+
+      - name: publicar en Releases (link directo)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "chutube-${{ github.run_number }}" ChuTube.apk ChuTube-arm32.apk \
+            -R ${{ github.repository }} --target ${{ github.sha }} --latest \
+            --title "ChuTube #${{ github.run_number }}" \
+            --notes "ChuTube.apk = celulares (arm64). ChuTube-arm32.apk = equipos viejos o radios de carro de 32 bits."
